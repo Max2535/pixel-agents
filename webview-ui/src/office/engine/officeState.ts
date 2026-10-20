@@ -16,7 +16,7 @@ import {
   PET_HIT_HEIGHT,
   WAITING_BUBBLE_DURATION_SEC,
 } from '../../constants.js';
-import { DEPARTMENT_LOOKS } from '../../constants.js';
+import { DEPARTMENT_LOOKS, LOUNGE_AREA_LABEL } from '../../constants.js';
 import { departmentLook, normalizeDepartment } from '../departments.js';
 import { getAnimationFrames, getCatalogEntry, getOnStateType } from '../layout/furnitureCatalog.js';
 import {
@@ -434,27 +434,96 @@ export class OfficeState {
         continue;
       }
       if (existing) {
-        existing.homeArea = area.label;
-        const inside = area.tiles.some(
+        // Keep it where its current job puts it: the room while working, else the lounge.
+        const zone = this.restingZone(
+          key,
+          existingId !== undefined && this.residentBusy.has(existingId),
+        );
+        existing.homeArea = zone.label;
+        const inside = zone.tiles.some(
           (t) => t.col === existing.tileCol && t.row === existing.tileRow,
         );
         if (!inside)
-          this.placeCharacter(existing, area.tiles[Math.floor(Math.random() * area.tiles.length)]);
+          this.placeCharacter(existing, zone.tiles[Math.floor(Math.random() * zone.tiles.length)]);
         continue;
       }
       const look = DEPARTMENT_LOOKS[key];
       const id = this.nextSubagentId--;
       const ch = createCharacter(id, look.palette, null, null, look.hueShift);
-      this.placeCharacter(
-        ch,
-        this.closestFreeWalkableTile(area.tiles[0].col, area.tiles[0].row, area.tiles) ??
-          area.tiles[0],
-      );
       ch.isSubagent = true;
       ch.agentType = key;
-      ch.homeArea = area.label;
+      ch.isActive = false;
+      const zone = this.restingZone(key, false);
+      this.placeCharacter(
+        ch,
+        this.closestFreeWalkableTile(zone.tiles[0].col, zone.tiles[0].row, zone.tiles) ??
+          zone.tiles[0],
+      );
+      ch.homeArea = zone.label;
+      ch.state = CharacterState.IDLE;
       this.characters.set(id, ch);
       this.residentIds.set(key, id);
+      this.settleResident(ch, false);
+    }
+  }
+
+  /** Where a resident belongs right now: its department room at work, the lounge otherwise. */
+  private restingZone(
+    department: string,
+    working: boolean,
+  ): { label: string; tiles: Array<{ col: number; row: number }> } {
+    const room = this.departmentArea(department)!;
+    if (working) return room;
+    return this.departmentArea(LOUNGE_AREA_LABEL) ?? room;
+  }
+
+  /**
+   * Send a resident to its zone (room when working, lounge when resting): onto a
+   * free seat there when there is one (desk chair facing a PC, or a sofa), else
+   * to a free spot in the zone.
+   */
+  private settleResident(ch: Character, working: boolean): void {
+    const dept = ch.agentType;
+    if (!dept) return;
+    const zone = this.restingZone(dept, working);
+    ch.homeArea = zone.label;
+    if (ch.seatId) {
+      const old = this.seats.get(ch.seatId);
+      if (old) old.assigned = false;
+      ch.seatId = null;
+    }
+    const wanted = zone.label.trim().toLowerCase();
+    const free: string[] = [];
+    for (const [uid, seat] of this.seats) {
+      if (!seat.assigned && this.seatZone(uid)?.trim().toLowerCase() === wanted) free.push(uid);
+    }
+    const pick = working
+      ? this.pickFromSeats(free, this.buildElectronicsTileSet())
+      : (free[Math.floor(Math.random() * free.length)] ?? null);
+    if (pick) {
+      this.reassignSeat(ch.id, pick);
+      return;
+    }
+    const target = this.closestFreeWalkableTile(
+      zone.tiles[Math.floor(Math.random() * zone.tiles.length)].col,
+      zone.tiles[Math.floor(Math.random() * zone.tiles.length)].row,
+      zone.tiles,
+    );
+    if (!target) return;
+    const path = findPath(
+      ch.tileCol,
+      ch.tileRow,
+      target.col,
+      target.row,
+      this.tileMap,
+      this.blockedTiles,
+    );
+    if (path.length > 0) {
+      ch.path = path;
+      ch.moveProgress = 0;
+      ch.state = CharacterState.WALK;
+      ch.frame = 0;
+      ch.frameTimer = 0;
     }
   }
 
@@ -490,6 +559,7 @@ export class OfficeState {
     ch.bubbleType = null;
     this.setAgentTool(id, null);
     this.setAgentActive(id, false);
+    this.settleResident(ch, false);
   }
 
   /** Tiles a character may wander to: its home Area when it has one, else the whole office. */
@@ -860,6 +930,7 @@ export class OfficeState {
       const resident = this.characters.get(residentId)!;
       resident.parentAgentId = parentAgentId;
       this.residentBusy.set(residentId, key);
+      this.settleResident(resident, true);
       this.subagentIdMap.set(key, residentId);
       this.subagentMeta.set(residentId, { parentAgentId, parentToolId });
       return residentId;

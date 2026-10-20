@@ -217,3 +217,31 @@ test('residents are not persisted and survive a layout rebuild inside their Area
   assert.equal(qa.seatId, null);
   assert.ok(qa.tileCol >= 4 && qa.tileCol < 8);
 });
+
+/** areaLayout() plus a lounge in cols 8-11. */
+function loungeLayout(): OfficeLayout {
+  const layout = areaLayout();
+  layout.areas!.push({ label: 'lounge', color: 'grey' });
+  layout.areaTiles = layout.areaTiles!.map((a, i) => (i % 12 >= 8 ? 'lounge' : a));
+  return layout;
+}
+
+test('with a lounge, residents rest there and go to their room for a Subtask', () => {
+  const os = new OfficeState(loungeLayout());
+  const find = (t: string) => [...os.characters.values()].find((c) => c.agentType === t)!;
+  const qa = find('qa');
+  assert.ok(qa.tileCol >= 8, `idle resident starts in the lounge, col ${qa.tileCol}`);
+  assert.equal(qa.homeArea, 'lounge');
+
+  os.addAgent(1, 3, 90);
+  os.addSubagent(1, 'tool-qa', 'qa');
+  assert.equal(qa.homeArea, 'QA', 'working: its room is home');
+  os.setAgentActive(qa.id, true);
+  for (let i = 0; i < 300; i++) os.update(0.1);
+  assert.ok(qa.tileCol >= 4 && qa.tileCol < 8, `walked to its room, col ${qa.tileCol}`);
+
+  os.removeSubagent(1, 'tool-qa');
+  assert.equal(qa.homeArea, 'lounge', 'done: back to the lounge');
+  for (let i = 0; i < 300; i++) os.update(0.1);
+  assert.ok(qa.tileCol >= 8, `walked back to the lounge, col ${qa.tileCol}`);
+});
