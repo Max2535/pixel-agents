@@ -223,6 +223,8 @@ export const DEPARTMENT_LOOKS: Readonly<Record<string, { palette: number; hueShi
   'it-support': { palette: 2, hueShift: 180 },
   sa: { palette: 3, hueShift: 90 },
 };
+/** Area label of the lounge: where department residents rest between Subtasks. */
+export const LOUNGE_AREA_LABEL = 'lounge';
 export const AUTO_ON_FACING_DEPTH = 3;
 export const AUTO_ON_SIDE_DEPTH = 2;
 export const CHARACTER_HIT_HALF_WIDTH = 8;
