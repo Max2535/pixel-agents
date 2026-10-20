@@ -35,7 +35,27 @@ test('every department gets a distinct palette + hueShift combination', () => {
     assert.ok(!seen.has(key), `${name} collides with another department (${key})`);
     seen.add(key);
   }
-  assert.equal(seen.size, 8, 'the eight departments of the AI team');
+  assert.equal(seen.size, 10, 'the ten departments of the AI team');
+});
+
+test('the keys are the subagent_type names the AI team actually uses', () => {
+  // One per .claude/agents/*.md in restaurant-system-management. `support` alone
+  // never matched: the department is `marketing-support`.
+  const team = [
+    'engineering',
+    'qa',
+    'security',
+    'devops-sre',
+    'product',
+    'marketing-support',
+    'finance',
+    'legal',
+    'it-support',
+    'sa',
+  ];
+  assert.deepEqual(Object.keys(DEPARTMENT_LOOKS).sort(), [...team].sort());
+  for (const name of team) assert.ok(departmentLook(name), `${name} has a look`);
+  assert.equal(departmentLook('support'), undefined);
 });
 
 test('departmentLook is case/whitespace-insensitive and ignores unknown types', () => {
@@ -86,4 +106,62 @@ test('addSubagent stays idempotent per (parent, tool): the first type wins', () 
   const again = os.addSubagent(1, 'tool-1', 'legal');
   assert.equal(first, again);
   assert.equal(os.characters.get(first)!.agentType, 'security');
+});
+
+/** A 12x6 floor split into three Areas: engineering (cols 0-3), qa (4-7), no area (8-11). */
+function areaLayout(): OfficeLayout {
+  const cols = 12;
+  const rows = 6;
+  const layout = floorLayout(cols, rows);
+  layout.areas = [
+    { label: 'engineering', color: 'blue' },
+    { label: 'QA', color: 'orange' },
+  ];
+  layout.areaTiles = Array.from({ length: cols * rows }, (_, i) => {
+    const col = i % cols;
+    if (col < 4) return 'engineering';
+    if (col < 8) return 'QA';
+    return null;
+  });
+  return layout;
+}
+
+test('a department sub-agent spawns inside the Area named after its department', () => {
+  const os = new OfficeState(areaLayout());
+  os.addAgent(1, 3, 90);
+  // the parent stands somewhere else entirely
+  const parent = os.characters.get(1)!;
+  parent.tileCol = 10;
+  parent.tileRow = 2;
+
+  const qa = os.characters.get(os.addSubagent(1, 'tool-qa', 'qa'))!;
+  assert.ok(qa.tileCol >= 4 && qa.tileCol < 8, `qa spawned at col ${qa.tileCol}`);
+  assert.equal(qa.homeArea, 'QA', 'matches the Area label case-insensitively');
+
+  const eng = os.characters.get(os.addSubagent(1, 'tool-eng', 'engineering'))!;
+  assert.ok(eng.tileCol < 4, `engineering spawned at col ${eng.tileCol}`);
+});
+
+test('a department sub-agent keeps wandering inside its Area', () => {
+  const os = new OfficeState(areaLayout());
+  os.addAgent(1, 3, 90);
+  const qa = os.characters.get(os.addSubagent(1, 'tool-qa', 'qa'))!;
+  qa.matrixEffect = null;
+  for (let i = 0; i < 4000; i++) {
+    os.update(0.1);
+    assert.ok(qa.tileCol >= 4 && qa.tileCol < 8, `left its Area at step ${i}: col ${qa.tileCol}`);
+  }
+});
+
+test('without a matching Area the sub-agent behaves as before', () => {
+  const os = new OfficeState(areaLayout());
+  os.addAgent(1, 3, 90);
+  const legal = os.characters.get(os.addSubagent(1, 'tool-l', 'legal'))!;
+  assert.equal(legal.homeArea, undefined);
+  const plain = os.characters.get(os.addSubagent(1, 'tool-p'))!;
+  assert.equal(plain.homeArea, undefined);
+  // and a layout with no Areas at all
+  const bare = new OfficeState(floorLayout());
+  bare.addAgent(1, 3, 90);
+  assert.equal(bare.characters.get(bare.addSubagent(1, 'tool-q', 'qa'))!.homeArea, undefined);
 });

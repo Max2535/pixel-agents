@@ -95,6 +95,8 @@ export class OfficeState {
    * `findFreeSeat()` to bias new agents toward seats inside their Directory's Area.
    */
   areaMappings: Record<string, string[]> = {};
+  /** Walkable tiles per Area label (lower-case); rebuilt lazily after each layout change. */
+  private areaWalkableCache = new Map<string, Array<{ col: number; row: number }>>();
 
   /**
    * The first-run consent greeter, deliberately NOT in `characters`.
@@ -129,6 +131,7 @@ export class OfficeState {
     this.blockedTiles = getBlockedTiles(this.layout.furniture);
     this.furniture = layoutToFurnitureInstances(this.layout.furniture);
     this.walkableTiles = getWalkableTiles(this.tileMap, this.blockedTiles);
+    this.areaWalkableCache.clear();
     // Pets are built last because they need walkableTiles populated for spawn.
     this.rebuildPetsFromLayout(this.layout);
   }
@@ -142,6 +145,7 @@ export class OfficeState {
     this.blockedTiles = getBlockedTiles(layout.furniture);
     this.rebuildFurnitureInstances();
     this.walkableTiles = getWalkableTiles(this.tileMap, this.blockedTiles);
+    this.areaWalkableCache.clear();
 
     // Shift character positions when grid expands left/up
     if (shift && (shift.col !== 0 || shift.row !== 0)) {
@@ -404,15 +408,49 @@ export class OfficeState {
     return this.pickFromSeats(freeSeats, electronicsTiles);
   }
 
-  /** Closest walkable tile to (col,row) not occupied by another character, or null. */
-  private closestFreeWalkableTile(col: number, row: number): { col: number; row: number } | null {
+  /** Tiles a character may wander to: its home Area when it has one, else the whole office. */
+  private wanderTilesFor(ch: Character): Array<{ col: number; row: number }> {
+    if (!ch.homeArea) return this.walkableTiles;
+    return this.departmentArea(ch.homeArea)?.tiles ?? this.walkableTiles;
+  }
+
+  /**
+   * The Area whose label names this department (case-insensitive) and its walkable
+   * tiles, or null when the layout has no such Area (or it has no walkable tile).
+   * A department Sub-agent lives there instead of wandering the whole office.
+   */
+  private departmentArea(
+    department: string | undefined,
+  ): { label: string; tiles: Array<{ col: number; row: number }> } | null {
+    const wanted = department?.trim().toLowerCase();
+    const areaTiles = this.layout.areaTiles;
+    if (!wanted || !areaTiles || areaTiles.length === 0) return null;
+    const label = this.layout.areas?.find((a) => a.label.trim().toLowerCase() === wanted)?.label;
+    if (!label) return null;
+    let tiles = this.areaWalkableCache.get(wanted);
+    if (!tiles) {
+      tiles = this.walkableTiles.filter(
+        (t) => areaTiles[t.row * this.layout.cols + t.col] === label,
+      );
+      this.areaWalkableCache.set(wanted, tiles);
+    }
+    return tiles.length > 0 ? { label, tiles } : null;
+  }
+
+  /** Closest walkable tile to (col,row) not occupied by another character, or null.
+   *  `among` limits the search (default: every walkable tile). */
+  private closestFreeWalkableTile(
+    col: number,
+    row: number,
+    among: Array<{ col: number; row: number }> = this.walkableTiles,
+  ): { col: number; row: number } | null {
     const occupied = new Set<string>();
     for (const ch of this.characters.values()) {
       occupied.add(`${ch.tileCol},${ch.tileRow}`);
     }
     let best: { col: number; row: number } | null = null;
     let bestDist = Infinity;
-    for (const tile of this.walkableTiles) {
+    for (const tile of among) {
       if (occupied.has(`${tile.col},${tile.row}`)) continue;
       const d = Math.abs(tile.col - col) + Math.abs(tile.row - row);
       if (d < bestDist) {
@@ -742,7 +780,13 @@ export class OfficeState {
     const parentCol = parentCh ? parentCh.tileCol : 0;
     const parentRow = parentCh ? parentCh.tileRow : 0;
     let spawn = { col: parentCol, row: parentRow };
-    if (this.walkableTiles.length > 0) {
+    // A department Sub-agent goes to the Area named after its department, when there is one.
+    const home = this.departmentArea(agentType);
+    if (home) {
+      spawn =
+        this.closestFreeWalkableTile(parentCol, parentRow, home.tiles) ??
+        home.tiles[Math.floor(Math.random() * home.tiles.length)];
+    } else if (this.walkableTiles.length > 0) {
       spawn = this.closestFreeWalkableTile(parentCol, parentRow) ?? this.walkableTiles[0];
     }
 
@@ -756,6 +800,7 @@ export class OfficeState {
     ch.isSubagent = true;
     ch.parentAgentId = parentAgentId;
     ch.agentType = normalizeDepartment(agentType);
+    if (home) ch.homeArea = home.label;
     startMatrixEffect(ch, 'spawn');
     this.characters.set(id, ch);
 
@@ -1154,7 +1199,14 @@ export class OfficeState {
 
       // Temporarily unblock own seat so character can pathfind to it
       this.withOwnSeatUnblocked(ch, () =>
-        updateCharacter(ch, dt, this.walkableTiles, this.seats, this.tileMap, this.blockedTiles),
+        updateCharacter(
+          ch,
+          dt,
+          this.wanderTilesFor(ch),
+          this.seats,
+          this.tileMap,
+          this.blockedTiles,
+        ),
       );
 
       // Tick bubble timer for waiting bubbles
