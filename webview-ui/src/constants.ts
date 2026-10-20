@@ -217,9 +217,11 @@ export const DEPARTMENT_LOOKS: Readonly<Record<string, { palette: number; hueShi
   security: { palette: 2, hueShift: 0 },
   'devops-sre': { palette: 3, hueShift: 0 },
   product: { palette: 4, hueShift: 0 },
-  support: { palette: 5, hueShift: 0 },
+  'marketing-support': { palette: 5, hueShift: 0 },
   finance: { palette: 0, hueShift: 150 },
   legal: { palette: 1, hueShift: 210 },
+  'it-support': { palette: 2, hueShift: 180 },
+  sa: { palette: 3, hueShift: 90 },
 };
 export const AUTO_ON_FACING_DEPTH = 3;
 export const AUTO_ON_SIDE_DEPTH = 2;
