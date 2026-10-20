@@ -165,3 +165,55 @@ test('without a matching Area the sub-agent behaves as before', () => {
   bare.addAgent(1, 3, 90);
   assert.equal(bare.characters.get(bare.addSubagent(1, 'tool-q', 'qa'))!.homeArea, undefined);
 });
+
+test('every department with an Area has one resident, in its Area, from the start', () => {
+  const os = new OfficeState(areaLayout());
+  const residents = [...os.characters.values()].filter((c) => c.isSubagent);
+  assert.deepEqual(residents.map((c) => c.agentType).sort(), ['engineering', 'qa']);
+  const qa = residents.find((c) => c.agentType === 'qa')!;
+  assert.ok(qa.tileCol >= 4 && qa.tileCol < 8);
+  assert.equal(qa.seatId, null);
+  // no Areas, no residents
+  assert.equal(new OfficeState(floorLayout()).characters.size, 0);
+});
+
+test('a Subtask borrows its department resident instead of spawning another', () => {
+  const os = new OfficeState(areaLayout());
+  os.addAgent(1, 3, 90);
+  const before = os.characters.size;
+  const qaId = os.addSubagent(1, 'tool-qa', 'qa');
+  assert.equal(os.characters.size, before, 'no new character');
+  assert.equal(os.getSubagentId(1, 'tool-qa'), qaId);
+
+  // a second concurrent QA Subtask cannot share it: it gets an ordinary sub-agent
+  const second = os.addSubagent(1, 'tool-qa2', 'qa');
+  assert.notEqual(second, qaId);
+  assert.equal(os.characters.size, before + 1);
+});
+
+test('finishing the Subtask returns the resident to idle and it can be borrowed again', () => {
+  const os = new OfficeState(areaLayout());
+  os.addAgent(1, 3, 90);
+  const qaId = os.addSubagent(1, 'tool-qa', 'qa');
+  os.setAgentActive(qaId, true);
+  os.removeSubagent(1, 'tool-qa');
+  const qa = os.characters.get(qaId)!;
+  assert.ok(qa, 'the resident stays');
+  assert.equal(qa.matrixEffect, null, 'no despawn effect');
+  assert.equal(qa.isActive, false);
+  assert.equal(os.getSubagentId(1, 'tool-qa'), null);
+  assert.equal(os.addSubagent(1, 'tool-qa-again', 'qa'), qaId);
+
+  os.removeAllSubagents(1);
+  assert.ok(os.characters.has(qaId), 'removing a parent releases, never removes, the resident');
+  assert.equal(os.characters.get(qaId)!.isActive, false);
+});
+
+test('residents are not persisted and survive a layout rebuild inside their Area', () => {
+  const os = new OfficeState(areaLayout());
+  assert.deepEqual(os.getPersistableSeats(), {});
+  os.rebuildFromLayout(areaLayout());
+  const qa = [...os.characters.values()].find((c) => c.agentType === 'qa')!;
+  assert.equal(qa.seatId, null);
+  assert.ok(qa.tileCol >= 4 && qa.tileCol < 8);
+});

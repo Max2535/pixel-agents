@@ -16,6 +16,7 @@ import {
   PET_HIT_HEIGHT,
   WAITING_BUBBLE_DURATION_SEC,
 } from '../../constants.js';
+import { DEPARTMENT_LOOKS } from '../../constants.js';
 import { departmentLook, normalizeDepartment } from '../departments.js';
 import { getAnimationFrames, getCatalogEntry, getOnStateType } from '../layout/furnitureCatalog.js';
 import {
@@ -88,6 +89,10 @@ export class OfficeState {
   /** Reverse lookup: sub-agent character ID → parent info */
   subagentMeta: Map<number, { parentAgentId: number; parentToolId: string }> = new Map();
   private nextSubagentId = -1;
+  /** Department key → id of its resident character (one per department, always present). */
+  private residentIds = new Map<string, number>();
+  /** Resident id → the `parentId:toolId` key of the Subtask it is currently working. */
+  private residentBusy = new Map<number, string>();
 
   /**
    * directoryName → list of Area labels that Directory belongs to.
@@ -134,6 +139,7 @@ export class OfficeState {
     this.areaWalkableCache.clear();
     // Pets are built last because they need walkableTiles populated for spawn.
     this.rebuildPetsFromLayout(this.layout);
+    this.ensureDepartmentResidents();
   }
 
   /** Rebuild all derived state from a new layout. Reassigns existing characters.
@@ -199,7 +205,7 @@ export class OfficeState {
 
     // Second pass: assign remaining characters to free seats
     for (const ch of this.characters.values()) {
-      if (ch.seatId) continue;
+      if (ch.seatId || this.isResident(ch.id)) continue;
       const seatId = this.findFreeSeat(ch.directoryName);
       if (seatId) {
         this.seats.get(seatId)!.assigned = true;
@@ -253,6 +259,7 @@ export class OfficeState {
 
     // Reconcile pets against the layout roster (handles editor add/remove)
     this.rebuildPetsFromLayout(layout);
+    this.ensureDepartmentResidents();
   }
 
   /** Move a character to a random walkable tile */
@@ -406,6 +413,83 @@ export class OfficeState {
 
     // Stage 3 — any free seat.
     return this.pickFromSeats(freeSeats, electronicsTiles);
+  }
+
+  /**
+   * One resident character per department that has an Area in the layout. They
+   * wander their own room all day; a Subtask of that department borrows its
+   * resident (see addSubagent) instead of spawning a new character.
+   */
+  ensureDepartmentResidents(): void {
+    for (const key of Object.keys(DEPARTMENT_LOOKS)) {
+      const area = this.departmentArea(key);
+      const existingId = this.residentIds.get(key);
+      const existing = existingId !== undefined ? this.characters.get(existingId) : undefined;
+      if (!area) {
+        // The Area is gone: retire its resident unless a Subtask is using it.
+        if (existingId !== undefined && !this.residentBusy.has(existingId)) {
+          this.characters.delete(existingId);
+          this.residentIds.delete(key);
+        }
+        continue;
+      }
+      if (existing) {
+        existing.homeArea = area.label;
+        const inside = area.tiles.some(
+          (t) => t.col === existing.tileCol && t.row === existing.tileRow,
+        );
+        if (!inside)
+          this.placeCharacter(existing, area.tiles[Math.floor(Math.random() * area.tiles.length)]);
+        continue;
+      }
+      const look = DEPARTMENT_LOOKS[key];
+      const id = this.nextSubagentId--;
+      const ch = createCharacter(id, look.palette, null, null, look.hueShift);
+      this.placeCharacter(
+        ch,
+        this.closestFreeWalkableTile(area.tiles[0].col, area.tiles[0].row, area.tiles) ??
+          area.tiles[0],
+      );
+      ch.isSubagent = true;
+      ch.agentType = key;
+      ch.homeArea = area.label;
+      this.characters.set(id, ch);
+      this.residentIds.set(key, id);
+    }
+  }
+
+  private placeCharacter(ch: Character, tile: { col: number; row: number }): void {
+    ch.tileCol = tile.col;
+    ch.tileRow = tile.row;
+    ch.x = tile.col * TILE_SIZE + TILE_SIZE / 2;
+    ch.y = tile.row * TILE_SIZE + TILE_SIZE / 2;
+    ch.path = [];
+    ch.moveProgress = 0;
+  }
+
+  private isResident(id: number): boolean {
+    for (const rid of this.residentIds.values()) if (rid === id) return true;
+    return false;
+  }
+
+  /** A department's resident, when it exists and is not already on a Subtask. */
+  private claimResident(agentType: string | undefined): number | null {
+    const key = normalizeDepartment(agentType);
+    if (!key) return null;
+    const id = this.residentIds.get(key);
+    if (id === undefined || this.residentBusy.has(id) || !this.characters.has(id)) return null;
+    return id;
+  }
+
+  /** Send a resident back to idling after its Subtask ends. */
+  private releaseResident(id: number): void {
+    this.residentBusy.delete(id);
+    const ch = this.characters.get(id);
+    if (!ch) return;
+    ch.parentAgentId = null;
+    ch.bubbleType = null;
+    this.setAgentTool(id, null);
+    this.setAgentActive(id, false);
   }
 
   /** Tiles a character may wander to: its home Area when it has one, else the whole office. */
@@ -770,6 +854,17 @@ export class OfficeState {
     const key = `${parentAgentId}:${parentToolId}`;
     if (this.subagentIdMap.has(key)) return this.subagentIdMap.get(key)!;
 
+    // A known department borrows its resident instead of spawning a new character.
+    const residentId = this.claimResident(agentType);
+    if (residentId !== null) {
+      const resident = this.characters.get(residentId)!;
+      resident.parentAgentId = parentAgentId;
+      this.residentBusy.set(residentId, key);
+      this.subagentIdMap.set(key, residentId);
+      this.subagentMeta.set(residentId, { parentAgentId, parentToolId });
+      return residentId;
+    }
+
     const id = this.nextSubagentId--;
     const parentCh = this.characters.get(parentAgentId);
     const dept = departmentLook(agentType);
@@ -815,6 +910,13 @@ export class OfficeState {
     const id = this.subagentIdMap.get(key);
     if (id === undefined) return;
 
+    if (this.isResident(id)) {
+      this.releaseResident(id);
+      this.subagentIdMap.delete(key);
+      this.subagentMeta.delete(id);
+      return;
+    }
+
     const ch = this.characters.get(id);
     if (ch) {
       if (ch.matrixEffect === 'despawn') {
@@ -844,6 +946,12 @@ export class OfficeState {
     for (const [key, id] of this.subagentIdMap) {
       const meta = this.subagentMeta.get(id);
       if (meta && meta.parentAgentId === parentAgentId) {
+        if (this.isResident(id)) {
+          this.releaseResident(id);
+          this.subagentMeta.delete(id);
+          toRemove.push(key);
+          continue;
+        }
         const ch = this.characters.get(id);
         if (ch) {
           if (ch.matrixEffect === 'despawn') {
