@@ -16,6 +16,7 @@ import {
   PET_HIT_HEIGHT,
   WAITING_BUBBLE_DURATION_SEC,
 } from '../../constants.js';
+import { departmentLook, normalizeDepartment } from '../departments.js';
 import { getAnimationFrames, getCatalogEntry, getOnStateType } from '../layout/furnitureCatalog.js';
 import {
   createDefaultLayout,
@@ -722,15 +723,20 @@ export class OfficeState {
     return true;
   }
 
-  /** Create a sub-agent character with the parent's palette. Returns the sub-agent ID. */
-  addSubagent(parentAgentId: number, parentToolId: string): number {
+  /**
+   * Create a sub-agent character. It takes its department's look when `agentType`
+   * names a known department, otherwise the parent's palette.
+   * Returns the sub-agent ID.
+   */
+  addSubagent(parentAgentId: number, parentToolId: string, agentType?: string): number {
     const key = `${parentAgentId}:${parentToolId}`;
     if (this.subagentIdMap.has(key)) return this.subagentIdMap.get(key)!;
 
     const id = this.nextSubagentId--;
     const parentCh = this.characters.get(parentAgentId);
-    const palette = parentCh ? parentCh.palette : 0;
-    const hueShift = parentCh ? parentCh.hueShift : 0;
+    const dept = departmentLook(agentType);
+    const palette = dept?.palette ?? (parentCh ? parentCh.palette : 0);
+    const hueShift = dept?.hueShift ?? (parentCh ? parentCh.hueShift : 0);
 
     // Find the closest walkable tile to the parent, avoiding tiles occupied by other characters
     const parentCol = parentCh ? parentCh.tileCol : 0;
@@ -749,6 +755,7 @@ export class OfficeState {
     if (parentCh) ch.dir = parentCh.dir;
     ch.isSubagent = true;
     ch.parentAgentId = parentAgentId;
+    ch.agentType = normalizeDepartment(agentType);
     startMatrixEffect(ch, 'spawn');
     this.characters.set(id, ch);
 

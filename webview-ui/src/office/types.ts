@@ -217,6 +217,8 @@ export interface Character {
   isSubagent: boolean;
   /** Parent agent ID if this is a sub-agent, null otherwise */
   parentAgentId: number | null;
+  /** Sub-agents only: the spawn's `subagent_type` (e.g. "qa"), when it carried one. */
+  agentType?: string;
   /** Active matrix spawn/despawn effect, or null */
   matrixEffect: 'spawn' | 'despawn' | null;
   /** Timer counting up from 0 to MATRIX_EFFECT_DURATION */

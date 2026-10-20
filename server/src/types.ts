@@ -79,6 +79,11 @@ export interface AgentState {
    *  the webview never creates a Subtask ghost for them. Transient, lazily
    *  created, never persisted. */
   teammateSpawnToolIds?: Set<string>;
+  /** spawn tool id → the spawn input's `subagent_type` (e.g. "qa", "engineering").
+   *  Every agentToolStart (re-)broadcast for a spawn carries it as `subagentType`
+   *  so the webview can tell departments apart. Transient, lazily created,
+   *  never persisted. */
+  spawnSubagentTypes?: Map<string, string>;
 
   // -- Avatar customization --
   /** Preferred character palette (0-5). If undefined, auto-assigned for diversity. */
