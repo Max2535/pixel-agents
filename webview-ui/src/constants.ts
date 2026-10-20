@@ -204,6 +204,23 @@ export const INACTIVE_SEAT_TIMER_MIN_SEC = 3.0;
 export const INACTIVE_SEAT_TIMER_RANGE_SEC = 2.0;
 /** Default/fallback palette count (bundled characters). Actual count comes from getLoadedCharacterCount(). */
 export const PALETTE_COUNT = 6;
+
+/**
+ * Look of a Sub-agent character per department, keyed by the spawn's
+ * `subagent_type` (lower-case). `palette` indexes the bundled character sprites
+ * (0-5); `hueShift` rotates them so more than six departments stay distinct.
+ * Types not listed here (Explore, general-purpose, ...) inherit the parent's look.
+ */
+export const DEPARTMENT_LOOKS: Readonly<Record<string, { palette: number; hueShift: number }>> = {
+  engineering: { palette: 0, hueShift: 0 },
+  qa: { palette: 1, hueShift: 0 },
+  security: { palette: 2, hueShift: 0 },
+  'devops-sre': { palette: 3, hueShift: 0 },
+  product: { palette: 4, hueShift: 0 },
+  support: { palette: 5, hueShift: 0 },
+  finance: { palette: 0, hueShift: 150 },
+  legal: { palette: 1, hueShift: 210 },
+};
 export const AUTO_ON_FACING_DEPTH = 3;
 export const AUTO_ON_SIDE_DEPTH = 2;
 export const CHARACTER_HIT_HALF_WIDTH = 8;

@@ -38,6 +38,8 @@ export interface SubagentCharacter {
   parentAgentId: number;
   parentToolId: string;
   label: string;
+  /** The spawn's `subagent_type` (department), when it carried one. */
+  agentType?: string;
 }
 
 interface FurnitureAsset {
@@ -243,6 +245,11 @@ export function useExtensionMessages(
   // agentToolsClear must NOT remove them — despawning and re-creating moved the
   // character to a new tile every turn. Cleared by subagentClear/agentClosed.
   const backgroundParentToolIdsRef = useRef<Record<number, Set<string>>>({});
+
+  // Spawn `subagent_type` per `${agentId}:${toolId}`, remembered from agentToolStart
+  // so a sub created lazily by subagentToolStart (which carries no type) still gets
+  // its department's look.
+  const spawnSubagentTypesRef = useRef<Record<string, string>>({});
 
   useEffect(() => {
     // Buffer agents from existingAgents until layout is loaded
@@ -483,6 +490,8 @@ export function useExtensionMessages(
         // Named spawns are Teammates-to-be: a teammate character will represent
         // them, so never create the Subtask ghost the teammate would replace.
         const isTeammateSpawn = msg.isTeammateSpawn as boolean | undefined;
+        const subagentType = msg.subagentType as string | undefined;
+        if (subagentType) spawnSubagentTypesRef.current[`${id}:${toolId}`] = subagentType;
         const parentChar = os.characters.get(id);
         const parentHasTeam = !!parentChar?.teamName;
         if (
@@ -491,10 +500,19 @@ export function useExtensionMessages(
           (!runInBackground || !parentHasTeam)
         ) {
           const label = status.startsWith('Subtask:') ? status.slice('Subtask:'.length).trim() : '';
-          const subId = os.addSubagent(id, toolId);
+          const subId = os.addSubagent(id, toolId, subagentType);
           setSubagentCharacters((prev) => {
             if (prev.some((s) => s.id === subId)) return prev;
-            return [...prev, { id: subId, parentAgentId: id, parentToolId: toolId, label }];
+            return [
+              ...prev,
+              {
+                id: subId,
+                parentAgentId: id,
+                parentToolId: toolId,
+                label,
+                agentType: subagentType,
+              },
+            ];
           });
         }
       } else if (msg.type === 'agentToolDone') {
@@ -634,11 +652,15 @@ export function useExtensionMessages(
         // panel that lost it — create it lazily; addSubagent is idempotent.
         let subId = os.getSubagentId(id, parentToolId);
         if (subId === null) {
-          subId = os.addSubagent(id, parentToolId);
+          const lazyType = spawnSubagentTypesRef.current[`${id}:${parentToolId}`];
+          subId = os.addSubagent(id, parentToolId, lazyType);
           const newSubId = subId;
           setSubagentCharacters((prev) => {
             if (prev.some((s) => s.id === newSubId)) return prev;
-            return [...prev, { id: newSubId, parentAgentId: id, parentToolId, label: '' }];
+            return [
+              ...prev,
+              { id: newSubId, parentAgentId: id, parentToolId, label: '', agentType: lazyType },
+            ];
           });
           // Only watched background spawns are created lazily -- mark the
           // parent tool as background so agentToolsClear preserves the sub.

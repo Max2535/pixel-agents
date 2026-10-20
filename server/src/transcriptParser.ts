@@ -214,6 +214,15 @@ export function processTranscriptLine(
             if (isTeammateSpawn) {
               (agent.teammateSpawnToolIds ??= new Set()).add(block.id);
             }
+            const subagentType =
+              isSubagentSpawn &&
+              typeof block.input?.subagent_type === 'string' &&
+              block.input.subagent_type.length > 0
+                ? block.input.subagent_type
+                : undefined;
+            if (subagentType) {
+              (agent.spawnSubagentTypes ??= new Map()).set(block.id, subagentType);
+            }
             const useJsonlToolEvents = agent.hookDelivered && hasInlineTeammates(agentId, agents);
             if (!agent.hookDelivered || useJsonlToolEvents || isSubagentSpawn) {
               const runInBackground = isSubagentSpawn && block.input?.run_in_background === true;
@@ -226,6 +235,7 @@ export function processTranscriptLine(
                 permissionActive: agent.permissionSent,
                 runInBackground,
                 isTeammateSpawn: isTeammateSpawn || undefined,
+                subagentType,
               });
             }
           }
@@ -347,6 +357,7 @@ export function processTranscriptLine(
                     toolName: completedToolName,
                     runInBackground: true,
                     isTeammateSpawn: agent.teammateSpawnToolIds?.has(completedToolId) || undefined,
+                    subagentType: agent.spawnSubagentTypes?.get(completedToolId),
                   });
                 }
                 // Classify the spawn right away (sidecar may lag; the periodic
@@ -488,6 +499,7 @@ export function processTranscriptLine(
               toolName: agent.activeToolNames.get(toolId),
               runInBackground: true,
               isTeammateSpawn: agent.teammateSpawnToolIds?.has(toolId) || undefined,
+              subagentType: agent.spawnSubagentTypes?.get(toolId),
             });
           }
         }

@@ -63,6 +63,7 @@ export function resendAgentActivity(
         toolName,
         runInBackground: true,
         isTeammateSpawn: agent.teammateSpawnToolIds?.has(toolId) || undefined,
+        subagentType: agent.spawnSubagentTypes?.get(toolId),
       });
     }
 

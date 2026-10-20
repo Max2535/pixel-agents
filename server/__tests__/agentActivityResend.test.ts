@@ -144,6 +144,31 @@ describe('resendAgentActivity', () => {
     });
   });
 
+  it('replays a background spawn with its subagentType so the department survives a reconnect', () => {
+    const store = new AgentStateStore();
+    store.set(
+      1,
+      createTestAgent({
+        id: 1,
+        activeToolStatuses: new Map([
+          ['bg-qa', 'Subtask: Run e2e'],
+          ['bg-plain', 'Subtask: Look around'],
+        ]),
+        activeToolNames: new Map([
+          ['bg-qa', 'Agent'],
+          ['bg-plain', 'Agent'],
+        ]),
+        backgroundAgentToolIds: new Set(['bg-qa', 'bg-plain']),
+        spawnSubagentTypes: new Map([['bg-qa', 'qa']]),
+      }),
+    );
+    const sent: Array<Record<string, unknown>> = [];
+    resendAgentActivity((msg) => sent.push(msg), store);
+
+    expect(sent.find((m) => m.toolId === 'bg-qa')).toMatchObject({ subagentType: 'qa' });
+    expect(sent.find((m) => m.toolId === 'bg-plain')?.subagentType).toBeUndefined();
+  });
+
   it('sends team info for any team field trigger, omits when none present', () => {
     // teamName trigger
     let store = new AgentStateStore();

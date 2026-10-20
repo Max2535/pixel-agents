@@ -269,6 +269,38 @@ describe('background spawns (teams OFF) classified by sidecar name', () => {
     expect(start!.isTeammateSpawn).toBeUndefined();
   });
 
+  it("carries the spawn's subagent_type on the start and on the flagged re-broadcast", () => {
+    // The department of a Sub-agent rides on every agentToolStart for its spawn,
+    // including the re-send: the webview can only style the character from it.
+    seedSidecar();
+    spawnAndLaunch();
+
+    const starts = messages.filter(
+      (m) => m.type === 'agentToolStart' && m.toolId === SPAWN_TOOL_ID,
+    );
+    expect(starts.length).toBeGreaterThanOrEqual(2);
+    for (const s of starts) expect(s.subagentType).toBe('general-purpose');
+    expect(lead.spawnSubagentTypes?.get(SPAWN_TOOL_ID)).toBe('general-purpose');
+  });
+
+  it('omits subagentType for a non-spawn tool', () => {
+    processTranscriptLine(
+      1,
+      JSON.stringify({
+        type: 'assistant',
+        message: {
+          content: [{ type: 'tool_use', id: 'tool-bash', name: 'Bash', input: { command: 'ls' } }],
+        },
+      }),
+      agents,
+      waitingTimers,
+      permissionTimers,
+    );
+    const start = messages.find((m) => m.type === 'agentToolStart' && m.toolId === 'tool-bash');
+    expect(start).toBeDefined();
+    expect(start!.subagentType).toBeUndefined();
+  });
+
   it('re-broadcasts the spawn tool flagged runInBackground when the async result lands', () => {
     // The tool_use input OMITS run_in_background on current harnesses, so the
     // original agentToolStart went out unflagged. Without the flagged

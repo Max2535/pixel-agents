@@ -308,6 +308,12 @@ components:
             True when this spawn tool call carries a name, making the spawn a
             Teammate-to-be. The office must not create a Subtask sub-character
             for it — a teammate character will represent the spawn instead.
+        subagentType:
+          type: string
+          description: >-
+            The spawn call's `subagent_type` (e.g. "qa", "engineering"), when it
+            carried one. Lets the office tell the Sub-agents of different
+            departments apart. Only present on subagent-spawn tools.
 
     AgentToolDone:
       description: Agent finished executing a tool.
